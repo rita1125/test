@@ -1,0 +1,55 @@
+name: Deploy to Cloud Run
+
+on:
+  push:
+    branches: [dev, staging, prod]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+
+      - name: Set up Node
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build React app
+        run: npm run build
+
+      - name: Set up gcloud CLI
+        uses: google-github-actions/setup-gcloud@v1
+        with:
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+          service_account_key: ${{ secrets.GCP_SA_KEY }}
+          export_default_credentials: true
+
+      - name: Determine Cloud Run Service
+        id: vars
+        run: |
+          if [[ "${GITHUB_REF##*/}" == "prod" ]]; then
+            echo "SERVICE=my-react-prod" >> $GITHUB_OUTPUT
+          elif [[ "${GITHUB_REF##*/}" == "staging" ]]; then
+            echo "SERVICE=my-react-staging" >> $GITHUB_OUTPUT
+          else
+            echo "SERVICE=my-react-dev" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Build Docker image
+        run: |
+          gcloud builds submit \
+            --tag gcr.io/${{ secrets.GCP_PROJECT_ID }}/${{ steps.vars.outputs.SERVICE }}
+
+      - name: Deploy to Cloud Run
+        run: |
+          gcloud run deploy ${{ steps.vars.outputs.SERVICE }} \
+            --image gcr.io/${{ secrets.GCP_PROJECT_ID }}/${{ steps.vars.outputs.SERVICE }} \
+            --region ${{ secrets.REGION }} \
+            --platform managed \
+            --allow-unauthenticated
